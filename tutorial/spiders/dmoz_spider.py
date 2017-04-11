@@ -1,21 +1,27 @@
 # coding:utf-8
-import re
-import requests
 import scrapy
-#from tutorial import DmozItem
+from scrapy.http import FormRequest
 from faker import Factory
 from tutorial.items import DmozItem
-#PageItem,SumbitItem
+import urlparse
+import re
+import urllib2
+import urllib
+import requests
 
 f = Factory.create()
 
+# from scrapy import log
+# scrapy.log.start(logstdout=True)
+# scrapy.log.msg("This is a warning", level=log.DEGUG)
 
 class DmozSpider(scrapy.Spider):
-    name = "cisco"
+    name = "cisco1"
     allowed_domains = ["cisco.com"]
 
+
     start_urls = [
-       #'https://sso.cisco.com/autho/login/loginaction.html',
+       'https://sso.cisco.com/autho/login/loginaction.html',
     ]
 
     headers = {
@@ -41,147 +47,146 @@ class DmozSpider(scrapy.Spider):
         #'source': 'index_nav',
         #'Referer': 'https://apps.cisco.com/CustAdv/ServiceSales/contract/viewContractMgr.do?method=viewContractMgr',
     }
-    contract_urls = []
-    contract_go_urls = []
-    contract_pages_url = []
 
     def start_requests(self):
         return [scrapy.FormRequest(url='https://sso.cisco.com/autho/login/loginaction.html',
                                 #url='https://apps.cisco.com/CustAdv/ServiceSales/contract/viewContractMgr.do?method=viewContractMgr',
-                               formdata=self.formdata,
-                               headers=self.headers,
+                               formdata = self.formdata,
+                               headers = self.headers,
                                meta={'cookiejar': 1},
                                callback=self.after_login)]
 
     def after_login(self, response):
-        print "after_login"
-
+        # title = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr[1]/td[2]/a/@href').extract()[0][1:]
+        # print title
+        # print "after_login"
         return [scrapy.FormRequest(url='https://apps.cisco.com/CustAdv/ServiceSales/contract/viewContractMgr.do?method=viewContractMgr',
                                    meta={'cookiejar': response.meta['cookiejar']},
-                                   callback=self.parse_contract_manager)]
+                                   callback=self.contract_manager_login)]
 
-    # 进入合同管理页面
-    count = 0
-    def parse_contract_manager(self, response):
-        if self.count == 0:
-            self.tableID = response.xpath('//*[@id = "tableIdForActions"]/@value').extract()[0]
-            self.contextID = response.xpath('//*[@id = "cmContextForActions"]/@value').extract()[0]
-            self.pages = response.xpath('//*[@id = "mod_2"]/table/tbody/tr/td[2]/text').extract()
-            self.count = self.count +1
-        # info['href'] = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr[1]/td[2]/a/@href').extract()[0][1:]
+    def contract_manager_login(self, response):
+        pass
+        info = DmozItem()
+        #info['title'] = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr[1]/td[2]/a').extract()[0]
+        info['title'] = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr[1]/td[2]/a/@href').extract()[0][1:]
         # info['link'] = response.xpath('#cmDataDiv > table > tbody > tr:nth-child(3) > td:nth-child(2) > a').extract()[0]
-        # info['ContractNumber'] = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr[1]/td[2]/a/text').extract()[0]
-        print self.tableID
-        print self.contextID
-        for page in range(1):
-            page_url = r'https://apps.cisco.com/CustAdv/ServiceSales/contract/performTableActions.do?sortID=contractNumber&pageID=' + str(
-                page + 1) + '&tableID=' + self.tableID + '&contextID=' + self.contextID + '&method=paginateContracts&cmToLine=undefined&selectedProductsCHR=&currentPageId=1'
-            self.contract_pages_url.append(page_url)
+        # info['desc'] = response.xpath('//title[1]//text()').extract()[0]
+        url2  = 'https://apps.cisco.com/CustAdv/ServiceSales/contract'+ info['title']
+        print info['title']
+        return [scrapy.FormRequest(url2,
+            meta={'cookiejar': response.meta['cookiejar']},
+            callback=self.manager_login)]
 
-        list1 = self.collect_urls(self)
-        for res in list1:
-            response = res.response
-            items = response.xpath('//*[@id="cmDataDiv"]/table/tbody/tr')
-            print items
-            print len(items)
-            for item in items:
-                if item.xpath('td[2]/a/@href').extract():
-                    value_test = item.xpath('td[2]/a/@href').extract()[0]
-                    print value_test
-                    value = item.xpath('td[2]/a/@href').extract()[0][1:]
-                    # print "是什么"
-                    url = 'https://apps.cisco.com/CustAdv/ServiceSales/contract' + value
-                    print url
-                    self.contract_urls.append(url)
+    def manager_login(self, response):
+        list = []
+        title_href = response.xpath('//title[1]').extract()[0]
+        #ContractNumber = response.xpath('//*[@id="ContractNumber"]').extract()[0]
+        # //*[@id="ServiceLineId"]
 
-        # 这里怎么能用上生成器，那就暂时先用scrapy保存一下cookies。
-        list2 = self.enter_contract(self,response)
-        for co_url in list2:
-            response = list2.co_url
-            # 选取合同后，进入合同内容中心
-            title_href = response.xpath('//title[1]').extract()[0]
-            print "返回了什么"
-            script_text = response.xpath('//*[@id="mod_1"]/script/text()').extract()[0]
-            # print script_text
-            url_half = re.compile(
-                'case\s\'Download Contract or Selected Data\':[\s|\S]*?url = checkBrowser\(\'(.*?)\'\);').findall(
-                script_text)[0]
-            print url_half
-            print type(url_half)
-            url3 = 'https://apps.cisco.com/CustAdv/ServiceSales/contract/' + url_half
-            print url3
-            # 进入待下载页面
-            self.contract_go_urls.append(url3)
+        self.ContractNumber = response.xpath('//*[@id="ContractNumber"]/@value').extract()
+        self.seqId = response.xpath('//*[ @ id = "seqId"]/@value').extract()
+        self.ServiceLineId = response.xpath('//*[@id="ServiceLineId"]/@value').extract()
+        script_text = response.xpath('//*[@id="mod_1"]/script/text()').extract()[0]
+        # print script_text
+        url_half = re.compile('case\s\'Download Contract or Selected Data\':[\s|\S]*?url = checkBrowser\(\'(.*?)\'\);').findall(script_text)[0]
+        print url_half
+        print type(url_half)
+        url3 = 'https://apps.cisco.com/CustAdv/ServiceSales/contract/' + url_half
+        print url3
+        return [scrapy.FormRequest(url3,
+                                   meta={'cookiejar': response.meta['cookiejar']},
+                                   callback=self.download_page
+                                   )]
 
-        list3 = self.contract_go(self,response)
-        for con_url in self.contract_go_urls:
-            response = list2.co_url
-            # sumbititem = SumbitItem()
-            # sumbititem['seqId'] = response.xpath('//*[ @ id = "seqId"]/@value').extract()[0]
-            self.seqId = response.xpath('//*[ @ id = "seqId"]/@value').extract()[0]
-            # sumbititem['ServiceLineId'] = response.xpath('//*[@id="ServiceLineId"]/@value').extract()[0]
-            self.ServiceLineId = response.xpath('//*[@id="ServiceLineId"]/@value').extract()[0]
-            # sumbititem['ContractNumber'] = response.xpath('//*[@id="ContractNumber"]/@value').extract()[0]
-            self.ContractNumber = response.xpath('//*[@id="ContractNumber"]/@value').extract()[0]
-            print self.ContractNumber
-            self.formdata_b = {
-                'seqId': self.seqId,
-                'PageId': '2',
-                'page': 'CS',
-                'ContractNumber': self.ContractNumber,
-                'ServiceLineId': self.ServiceLineId,
-                'ContractType': 'HW',
-                'selProdType': 'MAJOR',
-                'EQT': '',
-                'userType': '',
-                'downloadMethod': 'SAVE',
-                'Config': 'MINOR',
-                'emailTo': 'service @ nantian.com.cn',
-                'emailCC': '',
-            }
-            # SumbitItem['formdata'] = self.formdata
-            print "设置完参数等待下载"
-            title_href = response.xpath('//title[1]').extract()[0]
-            title = response.xpath('//title[1]/text()').extract()[0]
-            print title
-            # return SumbitItem
-            # 提交新的formdata,请求真正的URL，action是下载
-            url_submmit ='https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm'
-            r = requests.post(url_submmit, headers=response.request.headers,data=self.formdata_b)
-            print dir(r)
-            # r = requests.get(response.url, headers=response.request.headers)
-            # print dir(r)
-            # with open(r'e:' + self.ContractNumber + '.zip', 'wb') as code:
-            #     code.write(r.content)
-
-    def collect_urls(self,response):
-        for x in self.contract_pages_url:
-            yield scrapy.FormRequest(url=x,meta={'cookiejar': response.meta['cookiejar']},
-            callback=self.collect_urls)
-
-    def enter_contract(self,response):
-        for x in self.contract_urls:
-            yield scrapy.FormRequest(url=x, meta={'cookiejar': response.meta['cookiejar']},
-                                     callback=self.enter_contract)
-
-    def contract_go(self,response):
-        for x in self.contract_urls:
-            yield scrapy.FormRequest(url=x,
-                                     meta={'cookiejar': response.meta['cookiejar']},
-                                     callback=self.contract_go)
+    def download_page(self, response):
+        self.formdata_b = {
+            'seqId': self.seqId,
+            'PageId': '2',
+            'page': 'CS',
+            'ContractNumber': self.ContractNumber,
+            'ServiceLineId': self.ServiceLineId,
+            'ContractType': 'HW',
+            'selProdType': 'MAJOR',
+            'EQT': '',
+            'userType': '',
+            'downloadMethod': 'SAVE',
+            'Config': 'MINOR',
+            'emailTo': 'service @ nantian.com.cn',
+            'emailCC': '',
+        }
+        print "已经进入下载页面"
+        title_href = response.xpath('//title[1]').extract()[0]
+        title = response.xpath('//title[1]/text()').extract()[0]
+        print title
+        # return [scrapy.FormRequest.from_response(response,
+        #                                          formdata=self.formdata,
+        #                                          #headers=self.headers,
+        #                                          meta={'cookiejar': response.meta['cookiejar']},
+        #                                          callback=self.download_result
+        #                                          )]
+        return [scrapy.FormRequest(url='https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm',
+                                   # url='https://apps.cisco.com/CustAdv/ServiceSales/contract/viewContractMgr.do?method=viewContractMgr',
+                                   formdata=self.formdata_b,
+                                   meta={'cookiejar': response.meta['cookiejar']},
+                                   callback=self.download_result
+                                   )]
+        # url_load = 'https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm'
+        # pppp = requests.post(url_load, headers = resopnse.request.,data = self.formdata_b)
+        # print pppp
 
 
-    # 选取下载合同的选项，点击GO
-    # 点击product+con 点击save now 点击sumbit
-    # 返回了一个地址，测试请求这个地址
-    # print r.raw
-    # r.encoding = 'utf-8'
-    # print r.content
-    # print "it's over!"
-    # #print r.text
-    # print type(StringIO.StringIO(r.context))
+    def download_result(self, response):
+        list = []
+        # title_href = response.xpath('//title[1]').extract()[0]
+        # title = response.xpath('//title[1]/text()').extract()[0]
+        print (response.url)
+        print dir(response.request)
+        print response.headers
+        print "这个是返回了什么呢？"
+        #requests.get('response.url')  # GET请求
+        #r = requests.get(response.url, headers = response.request.headers)
+        #print dir(r)
+        #print r.text
+        # return [scrapy.FormRequest(response.url,
+        #                                          #formdata=self.formdata_b,
+        #                                          #headers=self.headers,
+        #                                          meta={'cookiejar': response.meta['cookiejar']},
+        #                                          callback=self.after_login
+        #                                          )]
+        return [scrapy.FormRequest(
+            url='https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm',
+            # url='https://apps.cisco.com/CustAdv/ServiceSales/contract/viewContractMgr.do?method=viewContractMgr',
+            formdata=self.formdata_b,
+            meta={'cookiejar': response.meta['cookiejar']},
+            dont_filter=True,
+            callback=self.after_download
+            )]
 
-    # print response.body.decode(response.encoding)
-    # 这个是最后提交的网址，方法是POST
-    # https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm
+    def after_download(self, response):
+        #list = []
+        # title_href = response.xpath('//title[1]').extract()[0]
+        # title = response.xpath('//title[1]/text()').extract()[0]
+        print (response.url)
+        print dir(response.request)
+        #print "这个是返回了什么呢？"
+        r = requests.get(response.url, headers = response.request.headers)
+        print dir(r)
+        print type(r.content)
+        r.encoding = 'utf-8'
+        print r.content
+        print "it's over!"
+        print r.text
+        # return [scrapy.FormRequest.from_response(response,
+        #                                          formdata=self.formdata,
+        #                                          headers=self.headers,
+        #                                          meta={'cookiejar': response.meta['cookiejar']},
+        #                                          callback=self.after_login
+        #                                          )]
+        # print response.body.decode(response.encoding)
+        # title_href = response.xpath('//title[1]').extract()[0]
+        # title = response.xpath('//title[1]/text()').extract()[0]
+        # print title
+        # print title_href
+        # 这个是真正提交的网址，方法是POST
+        # https://apps.cisco.com/CustAdv/ServiceSales/contract/downloadContractSelectedData.do?methodName=onSubmitDataForm
 
